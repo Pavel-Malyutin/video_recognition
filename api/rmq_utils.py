@@ -1,3 +1,5 @@
+import json
+
 import aio_pika
 from aio_pika import Message
 from aio_pika.abc import AbstractRobustConnection
@@ -31,7 +33,7 @@ class RMQ:
         print(f"queue {name} created")
 
     async def post_message(self, msg: dict, query:str, priority: int = 0):
-        body = str(msg).encode()
+        body = json.dumps(msg).encode()
         async with self.channel_pool.acquire() as channel:
             await channel.default_exchange.publish(
                 message=Message(body=body, priority=priority),
