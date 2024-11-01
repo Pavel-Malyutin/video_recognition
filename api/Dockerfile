@@ -25,4 +25,4 @@ ENV PATH=/home/user/.local/bin:$PATH
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "/usr/local/bin/wait-for-it.sh db:5432 -- alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "/usr/local/bin/wait-for-it.sh db:5432 -- alembic upgrade head && gunicorn --config gunicorn_conf.py main:app"]
