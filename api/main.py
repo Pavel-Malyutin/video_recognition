@@ -58,8 +58,8 @@ async def upload_file(
         user_id=None,  # Update if user authentication is implemented
         file_type=file_type,
         status="queued",
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
         input_file_url=input_file_path,
         error_message=None,
     )
