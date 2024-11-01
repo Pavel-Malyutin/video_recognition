@@ -43,6 +43,12 @@ class TaskSegmentResponse(BaseModel):
         populate_by_name=True
     )
 
+    @field_validator("id", mode="before")
+    def uuid_to_str(cls, v):
+        if isinstance(v, UUID):
+            return str(v)
+        return v
+
 
 class RecognitionResultResponse(BaseModel):
     object_detected: str
@@ -69,3 +75,10 @@ class SegmentDetailResponse(BaseModel):
         from_attributes=True,
         populate_by_name=True
     )
+
+    @field_validator("id", mode="before")
+    def uuid_to_str(cls, v):
+        if isinstance(v, UUID):
+            return str(v)
+        return v
+
