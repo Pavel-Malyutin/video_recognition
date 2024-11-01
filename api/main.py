@@ -1,3 +1,5 @@
+import logging
+import sys
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -24,6 +26,13 @@ from schemas import (
 )
 from settings import settings
 import events
+
+logging.basicConfig(
+    stream=sys.stdout,
+    level=logging.DEBUG,
+    format='{"time": "%(asctime)-s", "message": "%(message)s"}',
+    datefmt="%d-%m-%Y %H:%M:%S",
+)
 
 
 @asynccontextmanager

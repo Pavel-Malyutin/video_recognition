@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 
 import aio_pika
 from aio_pika import Message
@@ -31,7 +32,7 @@ class RMQ:
             arguments={"x-max-priority": max_priority}
         )
         await connection.close()
-        print(f"queue {name} created")
+        logging.info(f"queue {name} created")
 
     async def post_message(self, msg: dict, query:str, priority: int = 0):
         body = json.dumps(msg).encode()
@@ -47,7 +48,7 @@ class RMQ:
             channel = await connection.channel()
             queue = await channel.declare_queue(queue_name, durable=True, arguments={"x-max-priority": 10})
             await queue.consume(func)
-            print(f" [*] Waiting for messages in {queue_name}. To exit press CTRL+C")
+            logging.info(f" [*] Waiting for messages in {queue_name}. To exit press CTRL+C")
             await asyncio.Future()
 
 

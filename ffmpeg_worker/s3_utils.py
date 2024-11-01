@@ -1,3 +1,5 @@
+import logging
+
 import aioboto3
 from settings import settings
 
@@ -52,11 +54,11 @@ async def create_buckets_if_not_exists():
             for bucket_name in bucket_names:
                 if bucket_name not in existing_buckets:
                     await s3_client.create_bucket(Bucket=bucket_name)
-                    print(f"Bucket '{bucket_name}' has been created.")
+                    logging.info(f"Bucket '{bucket_name}' has been created.")
                 else:
-                    print(f"Bucket '{bucket_name}' already exists.")
+                    logging.info(f"Bucket '{bucket_name}' already exists.")
     except Exception as e:
-        print(f"An error occurred while creating buckets: {e}")
+        logging.info(f"An error occurred while creating buckets: {e}")
 
 
 async def upload_file_to_s3(file_path: str, bucket_key: str):
