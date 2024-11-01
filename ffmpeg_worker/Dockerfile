@@ -13,6 +13,9 @@ RUN apt-get update \
 
 WORKDIR /app
 
+COPY wait-for-it.sh /usr/local/bin/wait-for-it.sh
+RUN chmod +x /usr/local/bin/wait-for-it.sh
+
 COPY requirements.txt .
 RUN python3.11 -m pip install --no-cache-dir -r requirements.txt
 
@@ -25,4 +28,4 @@ RUN chown -R workeruser:workeruser /app
 USER workeruser
 ENV PATH="/home/workeruser/.local/bin:${PATH}"
 
-CMD ["python3.11", "worker.py"]
+CMD ["sh", "-c", "/usr/local/bin/wait-for-it.sh rabbitmq:5672 -- /usr/local/bin/wait-for-it.sh rabbitmq:5672 -- python3.11 worker.py"]
