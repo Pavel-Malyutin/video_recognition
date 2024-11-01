@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import aio_pika
@@ -39,6 +40,15 @@ class RMQ:
                 message=Message(body=body, priority=priority),
                 routing_key=query,
             )
+
+    async def consume(self, queue_name: str, func):
+        connection = await self.get_connection()
+        async with connection:
+            channel = await connection.channel()
+            queue = await channel.declare_queue(queue_name, durable=True, arguments={"x-max-priority": 10})
+            await queue.consume(func)
+            print(f" [*] Waiting for messages in {queue_name}. To exit press CTRL+C")
+            await asyncio.Future()
 
 
 rmq = RMQ()
