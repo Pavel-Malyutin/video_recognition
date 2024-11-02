@@ -6,7 +6,7 @@ from settings import settings
 s3_session = aioboto3.Session()
 
 
-async def save_file_to_s3(file_content: bytes, key: str):
+async def save_bytes_to_s3(file_content: bytes, key: str):
     async with s3_session.client(
         "s3",
         endpoint_url=settings.s3_endpoint,
@@ -80,3 +80,16 @@ async def download_file_from_s3(bucket_key: str, file_path: str):
         aws_secret_access_key=settings.s3_secret_key,
     ) as s3_client:
         await s3_client.download_file(settings.s3_bucket, bucket_key, file_path)
+
+
+async def download_file_from_s3_to_memory(bucket_key):
+    session = aioboto3.Session()
+    async with session.client(
+        "s3",
+        endpoint_url=settings.s3_endpoint,
+        aws_access_key_id=settings.s3_access_key,
+        aws_secret_access_key=settings.s3_secret_key,
+    ) as s3_client:
+        response = await s3_client.get_object(Bucket=settings.MINIO_BUCKET, Key=bucket_key)
+        data = await response['Body'].read()
+        return data

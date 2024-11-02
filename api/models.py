@@ -42,7 +42,11 @@ class TaskSegment(Base):
     __tablename__ = "task_segments"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id"), nullable=False)
+    task_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     start_time = Column(Float, nullable=True)
     end_time = Column(Float, nullable=True)
     status = Column(String, nullable=False)
@@ -56,7 +60,7 @@ class TaskSegment(Base):
         "RecognitionResult",
         back_populates="segment",
         cascade="all, delete-orphan",
-        passive_deletes=True,
+        passive_deletes=True
     )
 
 
@@ -65,7 +69,9 @@ class RecognitionResult(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     segment_id = Column(
-        UUID(as_uuid=True), ForeignKey("task_segments.id"), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("task_segments.id", ondelete="CASCADE"),
+        nullable=False,
     )
     object_detected = Column(String, nullable=False)
     confidence = Column(Float, nullable=False)

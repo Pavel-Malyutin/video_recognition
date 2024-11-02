@@ -16,7 +16,7 @@ from repositories import (
     RecognitionResultRepository, get_session,
 )
 from rmq_utils import rmq
-from s3_utils import save_file_to_s3, create_buckets_if_not_exists
+from s3_utils import save_bytes_to_s3, create_buckets_if_not_exists
 from schemas import (
     UploadResponse,
     TaskResponse,
@@ -59,7 +59,7 @@ async def upload_file(
 
     input_file_path = f"input-files/{task_id}/{file.filename}"
     file_content = await file.read()
-    await save_file_to_s3(file_content, input_file_path)
+    await save_bytes_to_s3(file_content, input_file_path)
 
     task_repo = TaskRepository(session)
     new_task = Task(
