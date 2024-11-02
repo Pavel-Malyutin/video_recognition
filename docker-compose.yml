@@ -1,0 +1,102 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: api_gateway
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - rabbitmq
+      - minio
+    env_file:
+      - .env
+    networks:
+      - backend
+
+  db:
+    image: postgres:16-alpine
+    container_name: db
+    env_file:
+      - .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    ports:
+      - "5432:5432"
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - backend
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    command: server /data --console-address ":9001"
+    env_file:
+      - .env
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - backend
+
+  ffmpeg_worker:
+    build:
+      context: ./ffmpeg_worker
+      dockerfile: Dockerfile
+    container_name: ffmpeg_worker
+    depends_on:
+      - rabbitmq
+      - minio
+      - db
+    env_file:
+      - .env
+    networks:
+      - backend
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [ gpu ]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+
+  recognition_worker:
+    build:
+      context: ./recognition_worker
+      dockerfile: Dockerfile
+    container_name: recognition_worker
+    depends_on:
+      - rabbitmq
+      - minio
+      - db
+    env_file:
+      - .env
+    networks:
+      - backend
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [ gpu ]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+
+networks:
+  backend:
+
+volumes:
+  postgres_data:
+  minio_data:
