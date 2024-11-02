@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import traceback
 import uuid
 from datetime import datetime
 
@@ -62,92 +63,129 @@ class FFmpegWorker:
             task_data = json.loads(message_raw)
             await self.process_task(task_data)
 
+    async def process_scenes(
+            self,
+            scenes: list,
+            task_id: str,
+            input_file_path: str,
+            image_files_paths: dict,
+            recognition_tasks: list,
+            segment_repo
+    ):
+        for idx, (start_time, end_time) in enumerate(scenes):
+            segment_id = str(uuid.uuid4())
+            image_file_path = os.path.join(
+                tempfile.gettempdir(), f"{segment_id}.jpg"
+            )
+            image_s3_key = f"scene-images/{task_id}/scene_{segment_id}.jpg"
+
+            middle_time = (start_time + end_time) / 2
+
+            success = self.extract_frame_from_video(
+                input_file_path, image_file_path, middle_time
+            )
+            if not success:
+                await segment_repo.create_segment(
+                    TaskSegment(
+                        id=segment_id,
+                        task_id=task_id,
+                        start_time=start_time,
+                        end_time=end_time,
+                        status="error",
+                        segment_file_url=None,
+                        created_at=datetime.now(),
+                        updated_at=datetime.now(),
+                        error_message="Failed to extract frame",
+                    )
+                )
+                continue
+
+            image_files_paths.update({image_s3_key: image_file_path})
+
+            segment = TaskSegment(
+                id=segment_id,
+                task_id=task_id,
+                start_time=start_time,
+                end_time=end_time,
+                status="queued",
+                segment_file_url=image_s3_key,
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                error_message=None,
+            )
+            await segment_repo.create_segment(segment)
+
+            recognition_tasks.append(
+                {
+                    "segment_id": segment_id,
+                    "task_id": task_id,
+                    "image_file_url": image_s3_key,
+                }
+            )
+
+    async def finish_task_processing(
+            self,
+            image_files_paths: dict,
+            recognition_tasks: list,
+            task_id: str,
+            task_repo
+    ):
+
+        async with asyncio.TaskGroup() as tg:
+            for image_s3_key, image_file_path in image_files_paths.items():
+                tg.create_task(
+                    upload_file_to_s3(image_file_path, image_s3_key)
+                )
+
+        async with asyncio.TaskGroup() as tg:
+            for recognition_task in recognition_tasks:
+                tg.create_task(
+                    rmq.post_message(recognition_task, settings.recognition_queue)
+                )
+
+        await task_repo.update_task_status(task_id, "segmented")
+
     async def process_task(self, task_data):
         task_id = task_data["task_id"]
         input_file_url = task_data["input_file_url"]
+        image_files_paths = {}
+        recognition_tasks = []
+        input_file_path = None
 
         async with self.AsyncSessionLocal() as session:
             task_repo = TaskRepository(session)
             segment_repo = TaskSegmentRepository(session)
 
-            await task_repo.update_task_status(task_id, "processing")
-
-            input_file_path = os.path.join(tempfile.gettempdir(), f"{task_id}.mp4")
-            await download_file_from_s3(input_file_url, input_file_path)
-
-            scenes = await self.detect_scenes(input_file_path)
-            image_files_paths = {}
-            recognition_tasks = []
-
-            for idx, (start_time, end_time) in enumerate(scenes):
-                segment_id = str(uuid.uuid4())
-                image_file_path = os.path.join(
-                    tempfile.gettempdir(), f"{segment_id}.jpg"
+            try:
+                await task_repo.update_task_status(task_id, "processing")
+                input_file_path = os.path.join(tempfile.gettempdir(), f"{task_id}.mp4")
+                await download_file_from_s3(input_file_url, input_file_path)
+                scenes = await self.detect_scenes(input_file_path)
+                await self.process_scenes(
+                    scenes=scenes,
+                    recognition_tasks=recognition_tasks,
+                    input_file_path=input_file_path,
+                    image_files_paths=image_files_paths,
+                    segment_repo=segment_repo,
+                    task_id=task_id
                 )
-                image_s3_key = f"scene-images/{task_id}/scene_{segment_id}.jpg"
-
-                middle_time = (start_time + end_time) / 2
-
-                success = self.extract_frame_from_video(
-                    input_file_path, image_file_path, middle_time
-                )
-                if not success:
-                    await segment_repo.create_segment(
-                        TaskSegment(
-                            id=segment_id,
-                            task_id=task_id,
-                            start_time=start_time,
-                            end_time=end_time,
-                            status="error",
-                            segment_file_url=None,
-                            created_at=datetime.now(),
-                            updated_at=datetime.now(),
-                            error_message="Failed to extract frame",
-                        )
-                    )
-                    continue
-
-                image_files_paths.update({image_s3_key: image_file_path})
-
-                segment = TaskSegment(
-                    id=segment_id,
+                await self.finish_task_processing(
                     task_id=task_id,
-                    start_time=start_time,
-                    end_time=end_time,
-                    status="queued",
-                    segment_file_url=image_s3_key,
-                    created_at=datetime.now(),
-                    updated_at=datetime.now(),
-                    error_message=None,
+                    image_files_paths=image_files_paths,
+                    recognition_tasks=recognition_tasks,
+                    task_repo=task_repo
                 )
-                await segment_repo.create_segment(segment)
-
-                recognition_tasks.append(
-                    {
-                        "segment_id": segment_id,
-                        "task_id": task_id,
-                        "image_file_url": image_s3_key,
-                    }
-                )
-
-            async with asyncio.TaskGroup() as tg:
-                for image_s3_key, image_file_path in image_files_paths.items():
-                    tg.create_task(
-                        upload_file_to_s3(image_file_path, image_s3_key)
-                    )
-
-            async with asyncio.TaskGroup() as tg:
-                for recognition_task in recognition_tasks:
-                    tg.create_task(
-                        rmq.post_message(recognition_task, settings.recognition_queue)
-                    )
-
-            for image_file_path in image_files_paths.values():
-                os.remove(image_file_path)
-
-            await task_repo.update_task_status(task_id, "segmented")
-
-            os.remove(input_file_path)
+            except Exception as e:
+                logging.error(f"process_task exception {traceback.format_exc()}")
+                await task_repo.update_task_status(task_id, "segmentation error")
+            finally:
+                if input_file_path:
+                    image_files_paths.update({"input_file_path": input_file_path})
+                for image_file_path in image_files_paths.values():
+                    try:
+                        os.remove(image_file_path)
+                    except OSError:
+                        pass
 
     @staticmethod
     async def detect_scenes(input_file_path: str):
@@ -164,7 +202,7 @@ class FFmpegWorker:
             duration = video.duration.get_seconds()
             scenes.append((0.0, duration))
         else:
-            print(f"Detected {len(scenes)} scenes.")
+            logging.info(f"Detected {len(scenes)} scenes.")
         return scenes
 
     def extract_frame_from_video(
