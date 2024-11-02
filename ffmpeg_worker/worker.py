@@ -1,7 +1,9 @@
 import asyncio
 import json
+import logging
 import os
 import subprocess
+import sys
 import tempfile
 import uuid
 from datetime import datetime
@@ -19,11 +21,18 @@ from s3_utils import upload_file_to_s3, download_file_from_s3
 from settings import settings
 
 
+logging.basicConfig(
+    stream=sys.stdout,
+    level=logging.DEBUG,
+    format='{"time": "%(asctime)-s", "message": "%(message)s"}',
+    datefmt="%d-%m-%Y %H:%M:%S",
+)
+
+
 class FFmpegWorker:
     def __init__(self):
         self.engine = None
         self.AsyncSessionLocal = None
-        self.s3_client = None
         self.gpu_available = False
 
     async def initialize(self):
@@ -67,18 +76,20 @@ class FFmpegWorker:
             await download_file_from_s3(input_file_url, input_file_path)
 
             scenes = await self.detect_scenes(input_file_path)
-            segments_files_paths = {}
+            image_files_paths = {}
             recognition_tasks = []
 
             for idx, (start_time, end_time) in enumerate(scenes):
                 segment_id = str(uuid.uuid4())
-                segment_file_path = os.path.join(
-                    tempfile.gettempdir(), f"{segment_id}.mp4"
+                image_file_path = os.path.join(
+                    tempfile.gettempdir(), f"{segment_id}.jpg"
                 )
-                segment_s3_key = f"video-segments/{task_id}/segment_{segment_id}.mp4"
+                image_s3_key = f"scene-images/{task_id}/scene_{segment_id}.jpg"
 
-                success = await self.extract_video_segment(
-                    input_file_path, segment_file_path, start_time, end_time
+                middle_time = (start_time + end_time) / 2
+
+                success = self.extract_frame_from_video(
+                    input_file_path, image_file_path, middle_time
                 )
                 if not success:
                     await segment_repo.create_segment(
@@ -89,14 +100,14 @@ class FFmpegWorker:
                             end_time=end_time,
                             status="error",
                             segment_file_url=None,
-                            created_at=datetime.utcnow(),
-                            updated_at=datetime.utcnow(),
-                            error_message="FFmpeg failed to extract segment",
+                            created_at=datetime.now(),
+                            updated_at=datetime.now(),
+                            error_message="Failed to extract frame",
                         )
                     )
                     continue
 
-                segments_files_paths.update({segment_s3_key: segment_file_path})
+                image_files_paths.update({image_s3_key: image_file_path})
 
                 segment = TaskSegment(
                     id=segment_id,
@@ -104,9 +115,9 @@ class FFmpegWorker:
                     start_time=start_time,
                     end_time=end_time,
                     status="queued",
-                    segment_file_url=segment_s3_key,
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow(),
+                    segment_file_url=image_s3_key,
+                    created_at=datetime.now(),
+                    updated_at=datetime.now(),
                     error_message=None,
                 )
                 await segment_repo.create_segment(segment)
@@ -115,22 +126,24 @@ class FFmpegWorker:
                     {
                         "segment_id": segment_id,
                         "task_id": task_id,
-                        "segment_file_url": segment_s3_key,
+                        "image_file_url": image_s3_key,
                     }
                 )
 
             async with asyncio.TaskGroup() as tg:
-                for segment_s3_key, segment_file_path in segments_files_paths.items():
+                for image_s3_key, image_file_path in image_files_paths.items():
                     tg.create_task(
-                        upload_file_to_s3(segment_file_path, segment_s3_key)
+                        upload_file_to_s3(image_file_path, image_s3_key)
                     )
+
             async with asyncio.TaskGroup() as tg:
                 for recognition_task in recognition_tasks:
                     tg.create_task(
                         rmq.post_message(recognition_task, settings.recognition_queue)
                     )
-            for segment_file_path in segments_files_paths.values():
-                os.remove(segment_file_path)
+
+            for image_file_path in image_files_paths.values():
+                os.remove(image_file_path)
 
             await task_repo.update_task_status(task_id, "segmented")
 
@@ -154,27 +167,31 @@ class FFmpegWorker:
             print(f"Detected {len(scenes)} scenes.")
         return scenes
 
-    async def extract_video_segment(
-        self,
-        input_file_path: str,
-        output_file_path: str,
-        start_time: float,
-        end_time: float
+    def extract_frame_from_video(
+            self,
+            input_file_path: str,
+            output_image_path: str,
+            timestamp: float
     ):
         try:
             stream = (
                 ffmpeg
-                .input(input_file_path, ss=start_time, to=end_time)
-                .output(output_file_path, vcodec='copy', acodec='copy')
+                .input(input_file_path, ss=timestamp)
+                .output(output_image_path, vframes=1)
             )
+
             if self.gpu_available:
                 stream = stream.global_args('-hwaccel', 'cuda')
-            stream.run(overwrite_output=True)
+
+            stream.run(
+                overwrite_output=True,
+                capture_stdout=True,
+                capture_stderr=True
+            )
             return True
         except ffmpeg.Error as e:
-            print(f"Ошибка FFmpeg: {e}")
+            logging.error(f"Ошибка FFmpeg: {e}")
             return False
-
 
 async def main():
     worker = FFmpegWorker()

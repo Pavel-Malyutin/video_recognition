@@ -31,10 +31,6 @@ class Settings(BaseSettings):
         default='video_processing_queue',
         validation_alias='VIDEO_PROCESSING_QUEUE'
     )
-    photo_processing_queue: str = Field(
-        default='photo_processing_queue',
-        validation_alias='PHOTO_PROCESSING_QUEUE'
-    )
     recognition_queue: str = Field(
         default='recognition_queue',
         validation_alias='RECOGNITION_QUEUE'

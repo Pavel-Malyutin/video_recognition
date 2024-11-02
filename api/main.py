@@ -9,7 +9,7 @@ import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Task
+from models import Task, TaskSegment
 from repositories import (
     TaskRepository,
     TaskSegmentRepository,
@@ -37,7 +37,7 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await rmq.create_queue(settings.photo_processing_queue)
+    await rmq.create_queue(settings.recognition_queue)
     await rmq.create_queue(settings.video_processing_queue)
     await create_buckets_if_not_exists()
     yield
@@ -74,17 +74,38 @@ async def upload_file(
     )
     await task_repo.create_task(new_task)
 
-    queue_name = (
-        settings.video_processing_queue
-        if file_type == "video"
-        else settings.photo_processing_queue
-    )
-    message = {
-        "task_id": task_id,
-        "file_type": file_type,
-        "input_file_url": input_file_path,
-    }
-    await rmq.post_message(message, queue_name)
+    if file_type == "video":
+        queue_name = settings.video_processing_queue
+        message = {
+            "task_id": task_id,
+            "file_type": file_type,
+            "input_file_url": input_file_path,
+        }
+        await rmq.post_message(message, queue_name)
+    else:
+        queue_name = settings.recognition_queue
+        segment_id = str(uuid.uuid4())
+
+        task_segment_repo = TaskSegmentRepository(session)
+        segment = TaskSegment(
+            id=segment_id,
+            task_id=task_id,
+            start_time=None,
+            end_time=None,
+            status="queued",
+            segment_file_url=input_file_path,  # Используем существующий путь
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+            error_message=None,
+        )
+        await task_segment_repo.create_segment(segment)
+
+        message = {
+            "segment_id": segment_id,
+            "task_id": task_id,
+            "image_file_url": input_file_path,
+        }
+        await rmq.post_message(message, queue_name)
 
     return UploadResponse(task_id=task_id)
 
